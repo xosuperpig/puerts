@@ -40,7 +40,7 @@ endif()
 
 set(V8_ENGINE ${CMAKE_SOURCE_DIR}/${JS_ENGINE})
 
-set(V8_INC ${V8_ENGINE}/Inc)
+#set(V8_INC ${V8_ENGINE}/Inc)
 
 set(ThirdParty ${CMAKE_SOURCE_DIR}/../../unreal/Puerts/ThirdParty)
 set(WEBSOCKET_INC ${ThirdParty}/Include/websocketpp)
@@ -48,11 +48,12 @@ set(ASIO_INC ${ThirdParty}/Include/asio)
 
 include_directories(
     ${CMAKE_SOURCE_DIR}
-    ${V8_INC}
+#    ${V8_INC}
     ${WEBSOCKET_INC}
     ${ASIO_INC}
     Inc
     ${CMAKE_SOURCE_DIR}/../../unreal/Puerts/Source/JsEnv/Private
+    ${CMAKE_SOURCE_DIR}/node
 )
 
 set ( PUERTS_INC
@@ -102,6 +103,7 @@ if (APPLE)
     else ()
         set(CMAKE_OSX_ARCHITECTURES "$(ARCHS_STANDARD_64_BIT)")
         add_library(puerts MODULE
+        #add_library(puerts SHARED
             ${PUERTS_SRC} ${PUERTS_INC}
         )
         set_target_properties ( puerts PROPERTIES BUNDLE TRUE )
@@ -113,7 +115,7 @@ else ( )
 endif ( )
 
 if ( WIN32 AND NOT CYGWIN )
-    target_compile_definitions (puerts PRIVATE BUILDING_V8_SHARED)
+    target_compile_definitions (puerts PUBLIC BUILDING_V8_SHARED)
 endif ( )
 
 if ( JS_ENGINE STREQUAL "quickjs")
@@ -194,9 +196,15 @@ elseif ( APPLE )
     if (IOS)
         target_compile_definitions (puerts PRIVATE PLATFORM_IOS)
     else ()
-        target_link_libraries(puerts
-            ${V8_ENGINE}/Lib/macOS/${LIB_FILE_NAME}
+        add_library(Node SHARED IMPORTED)
+        set_target_properties(Node PROPERTIES
+            IMPORTED_LOCATION /Users/yanghao/lib/libnode.83.dylib
         )
+        target_link_libraries(puerts Node)
+
+        #target_link_libraries(puerts
+        #    ${V8_ENGINE}/Lib/macOS/${LIB_FILE_NAME}
+        #)
         target_compile_definitions (puerts PRIVATE PLATFORM_MAC)
     endif ( )
 endif ( )

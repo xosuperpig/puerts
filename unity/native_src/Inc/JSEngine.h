@@ -21,24 +21,26 @@
 
 #include "JSFunction.h"
 #include "V8InspectorImpl.h"
+#include "uv.h"
+#include "node.h"
 
-#if defined(PLATFORM_WINDOWS)
+// #if defined(PLATFORM_WINDOWS)
 
-#if _WIN64
-#include "Blob/Win64/SnapshotBlob.h"
-#else
-#include "Blob/Win32/SnapshotBlob.h"
-#endif
+// #if _WIN64
+// #include "Blob/Win64/SnapshotBlob.h"
+// #else
+// #include "Blob/Win32/SnapshotBlob.h"
+// #endif
 
-#elif defined(PLATFORM_ANDROID_ARM)
-#include "Blob/Android/armv7a/SnapshotBlob.h"
-#elif defined(PLATFORM_ANDROID_ARM64)
-#include "Blob/Android/arm64/SnapshotBlob.h"
-#elif defined(PLATFORM_MAC)
-#include "Blob/macOS/SnapshotBlob.h"
-#elif defined(PLATFORM_IOS)
-#include "Blob/iOS/arm64/SnapshotBlob.h"
-#endif
+// #elif defined(PLATFORM_ANDROID_ARM)
+// #include "Blob/Android/armv7a/SnapshotBlob.h"
+// #elif defined(PLATFORM_ANDROID_ARM64)
+// #include "Blob/Android/arm64/SnapshotBlob.h"
+// #elif defined(PLATFORM_MAC)
+// #include "Blob/macOS/SnapshotBlob.h"
+// #elif defined(PLATFORM_IOS)
+// #include "Blob/iOS/arm64/SnapshotBlob.h"
+// #endif
 
 typedef void(*CSharpFunctionCallback)(v8::Isolate* Isolate, const v8::FunctionCallbackInfo<v8::Value>& Info, void* Self, int ParamLen, int64_t UserData);
 
@@ -70,6 +72,13 @@ struct FLifeCycleInfo
 static std::unique_ptr<v8::Platform> GPlatform;
 
 v8::Local<v8::ArrayBuffer> NewArrayBuffer(v8::Isolate* Isolate, void *Ptr, size_t Size, bool Copy);
+
+// #if USE_NODE_BACKEND
+static bool nodeInited = false;
+static std::vector<std::string> *node_args;
+static std::vector<std::string> *node_exec_args;
+static std::vector<std::string> *node_errors;
+// #endif
 
 class JSEngine
 {
@@ -143,6 +152,16 @@ private:
     std::mutex JSFunctionsMutex;
 
     V8Inspector* Inspector;
+
+// #if USE_NODE_BACKEND
+    std::unique_ptr<node::ArrayBufferAllocator> allocator;
+
+    node::IsolateData *isolate_data;
+
+    node::Environment *env;
+
+    uv_loop_t *loop;
+// #endif   
 
 private:
     v8::Local<v8::FunctionTemplate> ToTemplate(v8::Isolate* Isolate, bool IsStatic, CSharpFunctionCallback Callback, int64_t Data);

@@ -71,12 +71,30 @@ namespace puerts
         std::string Flags = "--trace-gc-object-stats";
         v8::V8::SetFlagsFromString(Flags.c_str(), static_cast<int>(Flags.size()));
 #endif
+        if (!nodeInited) {
+            
+            int argc = 1;
+            char **argv = new char *[1];
+            argv[0] = new char[1]{0};
 
-        v8::StartupData SnapshotBlob;
-        SnapshotBlob.data = (const char *)SnapshotBlobCode;
-        SnapshotBlob.raw_size = sizeof(SnapshotBlobCode);
-        v8::V8::SetSnapshotDataBlob(&SnapshotBlob);
+            argv = uv_setup_args(argc, argv);
+            node_args = new std::vector<std::string>(argv, argv + argc);
+            node_exec_args = new std::vector<std::string>();
+            node_errors = new std::vector<std::string>();
+            // Parse Node.js CLI options, and print any errors that have occurred while
+            // trying to parse them.
+            int exit_code = node::InitializeNodeWithArgs(node_args, node_exec_args, node_errors);
 
+            for (const std::string &error : *node_errors)
+                fprintf(stderr, "%s: %s\n", (*node_args)[0].c_str(), error.c_str());
+            nodeInited = true;
+        }
+
+        // v8::StartupData SnapshotBlob;
+        // SnapshotBlob.data = (const char *)SnapshotBlobCode;
+        // SnapshotBlob.raw_size = sizeof(SnapshotBlobCode);
+        // v8::V8::SetSnapshotDataBlob(&SnapshotBlob);
+        
         // 初始化Isolate和DefaultContext
         CreateParams.array_buffer_allocator = v8::ArrayBuffer::Allocator::NewDefaultAllocator();
         MainIsolate = v8::Isolate::New(CreateParams);
@@ -92,10 +110,86 @@ namespace puerts
         ResultInfo.Context.Reset(Isolate, Context);
         v8::Local<v8::Object> Global = Context->Global();
 
+// #if USE_NODE_BACKEND
+        // Set up a libuv event loop.
+        loop = new uv_loop_t;
+        int ret = uv_loop_init(loop);
+        if (ret != 0)
+        {
+            fprintf(stderr, "%s: Failed to initialize loop: %s\n",
+                    (*node_args)[0].c_str(),
+                    uv_err_name(ret));
+            // return 1;
+            // return nullptr;
+        }
+
+        allocator.reset(node::ArrayBufferAllocator::Create().get());
+
+        // Isolate *isolate = NewIsolate(allocator.get(), &loop, platform);
+        if (Isolate == nullptr)
+        {
+            fprintf(stderr, "%s: Failed to initialize V8 Isolate\n", (*node_args)[0].c_str());
+            // return 1;
+            // return nullptr;
+        }
+
+        // Create a node::IsolateData instance that will later be released using
+        // node::FreeIsolateData().
+        isolate_data = node::CreateIsolateData(
+            Isolate, 
+            loop, 
+            nullptr /*platform*/, 
+            allocator.get()
+        );
+
+        // Create a node::Environment instance that will later be released using
+        // node::FreeEnvironment().
+        env = node::CreateEnvironment(isolate_data, Context, *node_args, *node_exec_args);
+
+        // Persistent<Function> evaler;
+        {
+
+            // The v8::Context needs to be entered when node::CreateEnvironment() and
+            // node::LoadEnvironment() are being called.
+            v8::Context::Scope context_scope(Context);
+
+            // Set up the Node.js instance for execution, and run code inside of it.
+            // There is also a variant that takes a callback and provides it with
+            // the `require` and `process` objects, so that it can manually compile
+            // and run scripts as needed.
+            // The `require` function inside this script does *not* access the file
+            // system, and can only load built-in Node.js modules.
+            // `module.createRequire()` is being used to create one that is able to
+            // load files from the disk, and uses the standard CommonJS file loader
+            // instead of the internal-only `require` function.
+            // code = strcat("const publicRequire ="
+            //     "  require('module').createRequire(process.cwd() + '/');"
+            //     "globalThis.require = publicRequire;"
+            //     "require('vm').runInThisContext(\"", code);
+            // code = strcat(code, "\");");
+            v8::MaybeLocal<v8::Value> loadenv_ret = node::LoadEnvironment(
+                env,
+                "const publicRequire ="
+                "  require('module').createRequire(process.cwd() + '/');"
+                "globalThis.require = publicRequire;"
+                "return require('vm').runInThisContext;");
+
+            if (loadenv_ret.IsEmpty()) // There has been a JS exception.
+            {
+                // return 1;
+                // return nullptr;
+            }
+
+            // Local<Function> evaler = ;
+            // runner->evaler.Reset(Isolate, loadenv_ret.ToLocalChecked().As<v8::Function>());
+        }
+// #endif
+
         Global->Set(Context, FV8Utils::V8String(Isolate, "__tgjsEvalScript"), v8::FunctionTemplate::New(Isolate, &EvalWithPath)->GetFunction(Context).ToLocalChecked()).Check();
 
         Isolate->SetPromiseRejectCallback(&PromiseRejectCallback<JSEngine>);
         Global->Set(Context, FV8Utils::V8String(Isolate, "__tgjsSetPromiseRejectCallback"), v8::FunctionTemplate::New(Isolate, &SetPromiseRejectCallback<JSEngine>)->GetFunction(Context).ToLocalChecked()).Check();
+
     }
 
     JSEngine::~JSEngine()
@@ -135,7 +229,25 @@ namespace puerts
                 }
                 Iter->second.Reset();
             }
+
+// #if USE_NODE_BACKEND
+            // node::EmitExit() returns the current exit code.
+            node::EmitExit(env);
+
+            // node::Stop() can be used to explicitly stop the event loop and keep
+            // further JavaScript from running. It can be called from any thread,
+            // and will act like worker.terminate() if called from another thread.
+            node::Stop(env);
+// #endif
+// #if USE_NODE_BACKEND
+        node::FreeIsolateData(isolate_data);
+        node::FreeEnvironment(env);
+
+        int err = uv_loop_close(loop);
+        assert(err == 0);
+// #endif        
         }
+
 
         {
             std::lock_guard<std::mutex> guard(JSFunctionsMutex);
@@ -479,6 +591,20 @@ namespace puerts
 
     bool JSEngine::InspectorTick()
     {
+        bool more;
+        do
+        {
+            uv_run(loop, UV_RUN_DEFAULT);
+
+            // V8 tasks on background threads may end up scheduling new tasks in the
+            // foreground, which in turn can keep the event loop going. For example,
+            // WebAssembly.compile() may do so.
+            // platform->DrainTasks(context->GetIsolate());
+
+            // If there are new tasks, continue.
+            more = uv_loop_alive(loop);
+        } while (more == true);
+
         if (Inspector != nullptr)
         {
             return Inspector->Tick();

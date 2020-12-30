@@ -4,4 +4,4 @@ cd ..
 cmake --build build_osx --config Release
 mkdir -p ../Assets/Plugins/
 cp -r build_osx/Release/puerts.bundle ../Assets/Plugins/
-
+cp build_osx/Release/libpuerts.dylib /Users/yanghao/lib/
