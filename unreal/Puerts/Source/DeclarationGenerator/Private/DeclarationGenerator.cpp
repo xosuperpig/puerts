@@ -1,4 +1,4 @@
-﻿/*
+/*
 * Tencent is pleased to support the open source community by making Puerts available.
 * Copyright (C) 2020 THL A29 Limited, a Tencent company.  All rights reserved.
 * Puerts is licensed under the BSD 3-Clause License, except for the third-party components listed in the file 'LICENSE' which may be subject to their corresponding license terms.
@@ -19,16 +19,19 @@
 #include "LevelEditor.h"
 #include "GenDTSStyle.h"
 #include "GenDTSCommands.h"
-#include "Misc/MessageDialog.h"
+#include "Framework/Notifications/NotificationManager.h"
+#include "Widgets/Notifications/SNotificationList.h"
+//#include "Misc/MessageDialog.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "Engine/UserDefinedStruct.h"
+#include "TypeScriptObject.h"
 
 #define STRINGIZE(x) #x
 #define STRINGIZE_VALUE_OF(x) STRINGIZE(x)
 
 static FString SafeName(const FString &Name)
 {
-    auto Ret = Name.Replace(TEXT(" "), TEXT("")).Replace(TEXT("-"), TEXT("_")).Replace(TEXT("/"), TEXT("_"));
+    auto Ret = Name.Replace(TEXT(" "), TEXT("")).Replace(TEXT("-"), TEXT("_")).Replace(TEXT("/"), TEXT("_")).Replace(TEXT("("), TEXT("_")).Replace(TEXT(")"), TEXT("_")).Replace(TEXT("?"), TEXT("$"));
     if (Ret.Len() > 0)
     {
         auto FirstChar = Ret[0];
@@ -428,6 +431,7 @@ bool FTypeScriptDeclarationGenerator::GenFunction(FStringBuffer& OwnerBuffer,UFu
 
 void FTypeScriptDeclarationGenerator::GenClass(UClass* Class)
 {
+    if (Class->ImplementsInterface(UTypeScriptObject::StaticClass())) return;
     FStringBuffer StringBuffer {"", ""};
     StringBuffer << "class " << SafeName(Class->GetName());
     
@@ -655,7 +659,7 @@ interface TReactUMG {
 export var ReactUMG : TReactUMG;
 )";
 
-    FFileHelper::SaveStringToFile(ToString(), *(FPaths::ProjectContentDir() / TEXT("Typing/react-umg/index.d.ts")));
+    FFileHelper::SaveStringToFile(ToString(), *(FPaths::ProjectContentDir() / TEXT("ReactTyping/react-umg/index.d.ts")));
     FFileHelper::SaveStringToFile(Components, *(FPaths::ProjectContentDir() / TEXT("JavaScript/react-umg/components.js")));
 }
 
@@ -683,6 +687,7 @@ static bool IsReactSupportProperty(PropertyMacro *Property)
 
 void FReactDeclarationGenerator::GenClass(UClass* Class)
 {
+    if (Class->ImplementsInterface(UTypeScriptObject::StaticClass())) return;
     if (!Class->IsChildOf<UPanelSlot>() && !Class->IsChildOf<UWidget>()) return;
     bool IsWidget = Class->IsChildOf<UWidget>();
     FStringBuffer StringBuffer{ "", "" };
@@ -827,7 +832,12 @@ private:
             FText::FromString(TEXT("ue.d.ts")),
             FText::FromString(TEXT("Content/Typing/ue"))
         );
-        FMessageDialog::Open(EAppMsgType::Ok, DialogText);
+        // FMessageDialog::Open(EAppMsgType::Ok, DialogText);
+        FNotificationInfo Info(DialogText);
+        Info.bFireAndForget = true;
+        Info.FadeInDuration = 0.0f;
+        Info.FadeOutDuration = 5.0f;
+        FSlateNotificationManager::Get().AddNotification(Info);
     }
 
 public:

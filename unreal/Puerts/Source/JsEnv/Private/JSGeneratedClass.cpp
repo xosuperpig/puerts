@@ -10,7 +10,7 @@
 #include "JSGeneratedFunction.h"
 #include "JSWidgetGeneratedClass.h"
 #include "JSAnimGeneratedClass.h"
-
+#include "FunctionParametersDuplicate.h"
 
 UClass * UJSGeneratedClass::Create(const FString& Name, UClass *Parent, TSharedPtr<IDynamicInvoker> DynamicInvoker, v8::Isolate* Isolate, v8::Local<v8::Function> Constructor, v8::Local<v8::Object> Prototype)
 {
@@ -78,102 +78,27 @@ void UJSGeneratedClass::StaticConstructor(const FObjectInitializer& ObjectInitia
     }
 }
 
-
-static PropertyMacro* DuplicateProperty(
-#if ENGINE_MINOR_VERSION >= 25
-    FFieldVariant Outer,
-#else
-    UObject* Outer, 
-#endif
-    PropertyMacro* Property, FName Name)
+void UJSGeneratedClass::Override(v8::Isolate* Isolate, UClass *Class, UFunction * Super, v8::Local<v8::Function> JSImpl, TSharedPtr<IDynamicInvoker> DynamicInvoker, bool IsNative)
 {
-    auto SetupProperty = [&](PropertyMacro* NewProperty) {
-        NewProperty->SetPropertyFlags(Property->GetPropertyFlags());
-        return NewProperty;
-    };
-
-    PropertyMacro* NewProperty;
-    EObjectFlags ObjectFlags = RF_NoFlags;
-
-    if (auto StructProperty = CastFieldMacro<StructPropertyMacro>(Property))
+    bool Replace = Super->GetOuter() == Class;
+    FName FunctionName = Super->GetFName();
+    if (Replace)
     {
-#if ENGINE_MINOR_VERSION >= 25
-        auto Temp = new StructPropertyMacro(Outer, Name, ObjectFlags);
-#else
-        auto Temp = NewObject<StructPropertyMacro>(Outer, Name);
-#endif
-        Temp->Struct = StructProperty->Struct;
-        NewProperty = Temp;
-    }
-    else if (auto ArrayProperty = CastFieldMacro<ArrayPropertyMacro>(Property))
-    {
-#if ENGINE_MINOR_VERSION >= 25
-        auto Temp = new ArrayPropertyMacro(Outer, Name, ObjectFlags);
-#else
-        auto Temp = NewObject<ArrayPropertyMacro>(Outer, Name);
-#endif
-        Temp->Inner = DuplicateProperty(Temp, ArrayProperty->Inner, ArrayProperty->Inner->GetFName());
-        NewProperty = Temp;
-    }
-    else if (auto ByteProperty = CastFieldMacro<BytePropertyMacro>(Property))
-    {
-#if ENGINE_MINOR_VERSION >= 25
-        auto Temp =new BytePropertyMacro(Outer, Name, ObjectFlags);
-#else
-        auto Temp = NewObject<BytePropertyMacro>(Outer, Name);
-#endif
-        Temp->Enum = ByteProperty->Enum;
-        NewProperty = Temp;
-    }
-    else if (CastFieldMacro<BoolPropertyMacro>(Property))
-    {
-#if ENGINE_MINOR_VERSION >= 25
-        auto Temp =new BoolPropertyMacro(Outer, Name, ObjectFlags);
-#else
-        auto Temp = NewObject<BoolPropertyMacro>(Outer, Name);
-#endif
-        Temp->SetBoolSize(sizeof(bool), true);
-        NewProperty = Temp;
-    }
-    else if (auto ClassProperty = CastFieldMacro<ClassPropertyMacro>(Property))
-    {
-#if ENGINE_MINOR_VERSION >= 25
-        auto Temp = new ClassPropertyMacro(Outer, Name, ObjectFlags);
-#else
-        auto Temp = NewObject<ClassPropertyMacro>(Outer, Name);
-#endif
-        Temp->SetMetaClass(ClassProperty->MetaClass);
-        Temp->PropertyClass = UClass::StaticClass();
-        NewProperty = Temp;
-    }
-    else if (auto ObjectProperty = CastFieldMacro<ObjectPropertyMacro>(Property))
-    {
-#if ENGINE_MINOR_VERSION >= 25
-        auto Temp = new ObjectPropertyMacro(Outer, Name, ObjectFlags);
-#else
-        auto Temp = NewObject<ObjectPropertyMacro>(Outer, Name);
-#endif
-        Temp->SetPropertyClass(ObjectProperty->PropertyClass);
-        NewProperty = Temp;
-    }
-    else
-    {
-#if ENGINE_MINOR_VERSION >= 25
-        NewProperty = CastField<PropertyMacro>(FField::Duplicate(Property, Outer, *(Name.ToString())));
-#else
-        NewProperty = static_cast<PropertyMacro*>(StaticDuplicateObject(Property, Outer, *(Name.ToString())));
-#endif
+        if (auto MaybeJSFunction = Cast<UJSGeneratedFunction>(Super)) //这种情况只需简单替换下js函数
+        {
+            MaybeJSFunction->DynamicInvoker = DynamicInvoker;
+            MaybeJSFunction->FunctionTranslator = std::make_unique<puerts::FFunctionTranslator>(Super);
+            MaybeJSFunction->JsFunction.Reset(Isolate, JSImpl);
+            return;
+        }
+        //UE_LOG(LogTemp, Error, TEXT("replace %s of %s"), *Super->GetName(), *Class->GetName());
+        //同一Outer下的同名对象只能有一个...
+        Super->Rename(*FString::Printf(TEXT("%s%s"), *Super->GetName(), TEXT("__Removed")), Super->GetOuter(), REN_DontCreateRedirectors | REN_DoNotDirty | REN_ForceNoResetLoaders);
+        //UE_LOG(LogTemp, Error, TEXT("rename to %s"), *Super->GetName());
     }
 
-    NewProperty->SetPropertyFlags(Property->GetPropertyFlags());
-
-    return NewProperty;
-};
-
-
-void UJSGeneratedClass::Override(v8::Isolate* Isolate, UClass *Class, UFunction * Super, v8::Local<v8::Function> JSImpl, TSharedPtr<IDynamicInvoker> DynamicInvoker)
-{
-    UJSGeneratedFunction* Function = NewObject<UJSGeneratedFunction>(Class, Super->GetFName(), RF_Public);
+    //UE_LOG(LogTemp, Error, TEXT("new function name %s"), *FunctionName.ToString());
+    UJSGeneratedFunction* Function = NewObject<UJSGeneratedFunction>(Class, FunctionName, RF_Public);
 
     for (TFieldIterator<UFunction> It(Class, EFieldIteratorFlags::IncludeSuper, EFieldIteratorFlags::ExcludeDeprecated, EFieldIteratorFlags::IncludeInterfaces); It; ++It)
     {
@@ -187,67 +112,25 @@ void UJSGeneratedClass::Override(v8::Isolate* Isolate, UClass *Class, UFunction 
     Function->FirstPropertyToInit = NULL;
     Function->Script.Add(EX_EndFunctionParms);
 
-    Function->SetSuperStruct(Super);
-
-#if ENGINE_MINOR_VERSION >= 25
-    FField** Storage = &Function->ChildProperties;
-#else
-    UField** Storage = &Function->Children;
-#endif
-    PropertyMacro** PropertyStorage = &Function->PropertyLink;
-
-    for (TFieldIterator<PropertyMacro> PropIt(Super, EFieldIteratorFlags::ExcludeSuper); PropIt; ++PropIt)
+    if (!Replace)
     {
-        PropertyMacro* Property = *PropIt;
-        if (Property->HasAnyPropertyFlags(CPF_Parm))
-        {
-            PropertyMacro* NewProperty = DuplicateProperty(Function, Property, Property->GetFName());
-
-            *Storage = NewProperty;
-            Storage = &NewProperty->Next;
-
-            *PropertyStorage = NewProperty;
-            PropertyStorage = &NewProperty->PropertyLinkNext;
-        }
+        //UE_LOG(LogTemp, Error, TEXT("new function %s"), *FunctionName.ToString());
+        Function->SetSuperStruct(Super);
     }
+    else
+    {
+        //UE_LOG(LogTemp, Error, TEXT("replace function %s"), *FunctionName.ToString());
+        Function->SetSuperStruct(Super->GetSuperStruct());
+    }
+
+    DuplicateParameters(Super, Function);
 
     Function->Bind();
     Function->StaticLink(true);
-    Function->FunctionFlags |= FUNC_Native;//让UE不走解析
 
-    for (TFieldIterator<PropertyMacro> PropIt(Function, EFieldIteratorFlags::ExcludeSuper); PropIt; ++PropIt)
+    if (IsNative)
     {
-        PropertyMacro* Property = *PropIt;
-        if (Property->HasAnyPropertyFlags(CPF_Parm))
-        {
-            ++Function->NumParms;
-            Function->ParmsSize = Property->GetOffset_ForUFunction() + Property->GetSize();
-
-            if (Property->HasAnyPropertyFlags(CPF_OutParm))
-            {
-                Function->FunctionFlags |= FUNC_HasOutParms;
-            }
-
-            if (Property->HasAnyPropertyFlags(CPF_ReturnParm))
-            {
-                Function->ReturnValueOffset = Property->GetOffset_ForUFunction();
-
-                if (!Property->HasAnyPropertyFlags(CPF_IsPlainOldData | CPF_NoDestructor))
-                {
-                    Property->DestructorLinkNext = Function->DestructorLink;
-                    Function->DestructorLink = Property;
-                }
-            }
-        }
-        else
-        {
-            if (!Property->HasAnyPropertyFlags(CPF_ZeroConstructor))
-            {
-                Function->FirstPropertyToInit = Property;
-                Function->FunctionFlags |= FUNC_HasDefaults;
-                break;
-            }
-        }
+        Function->FunctionFlags |= FUNC_Native;//让UE不走解析
     }
 
     Function->SetNativeFunc(&UJSGeneratedFunction::execCallJS);
@@ -256,8 +139,27 @@ void UJSGeneratedClass::Override(v8::Isolate* Isolate, UClass *Class, UFunction 
     Function->DynamicInvoker = DynamicInvoker;
     Function->FunctionTranslator = std::make_unique<puerts::FFunctionTranslator>(Function);
 
-    Function->Next = Class->Children;
-    Class->Children = Function;
+    if (Replace)
+    {
+        Function->Next = Super->Next;
+        if (Class->Children == Super) // first one
+        {
+            Class->Children = Function;
+        }
+        else
+        {
+            auto P = Class->Children;
+            while (P && P->Next != Super) P = P->Next;
+            check(P);
+            P->Next = Function;
+        }
+        Class->RemoveFunctionFromFunctionMap(Super);
+    }
+    else
+    {
+        Function->Next = Class->Children;
+        Class->Children = Function;
+    }
     Class->AddFunctionToFunctionMap(Function, Function->GetFName());
 }
 
