@@ -170,8 +170,8 @@ namespace puerts
             v8::MaybeLocal<v8::Value> loadenv_ret = node::LoadEnvironment(
                 env,
                 "const publicRequire ="
-                "  require('module').createRequire(process.cwd() + '/');"
-                "globalThis.require = publicRequire;"
+                "  require('module').createRequire(process.cwd() + '/Assets/');"
+                "globalThis.nodeRequire = publicRequire;"
                 "return require('vm').runInThisContext;");
 
             if (loadenv_ret.IsEmpty()) // There has been a JS exception.

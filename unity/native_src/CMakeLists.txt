@@ -27,12 +27,13 @@ find_path(PUERTS_PROJECT_DIR NAMES SConstruct
     PATHS 
     ${CMAKE_SOURCE_DIR}
     NO_DEFAULT_PATH
-    )
+)
 
 MARK_AS_ADVANCED(PUERTS_PROJECT_DIR)
 
 if ( JS_ENGINE STREQUAL "quickjs")
 set(LIB_FILE_NAME libquickjs.a)
+elseif (JS_ENGINE STREQUAL "node")
 else()
 set(JS_ENGINE v8)
 set(LIB_FILE_NAME libwee8.a)
@@ -40,7 +41,14 @@ endif()
 
 set(V8_ENGINE ${CMAKE_SOURCE_DIR}/${JS_ENGINE})
 
-#set(V8_INC ${V8_ENGINE}/Inc)
+message(STATUS "JS_ENGINE----${JS_ENGINE}")
+
+if ( JS_ENGINE STREQUAL "node")
+    set(V8_INC ${CMAKE_SOURCE_DIR}/node)
+else ()
+    set(V8_INC ${V8_ENGINE}/Inc)
+endif ()
+
 
 set(ThirdParty ${CMAKE_SOURCE_DIR}/../../unreal/Puerts/ThirdParty)
 set(WEBSOCKET_INC ${ThirdParty}/Include/websocketpp)
@@ -48,12 +56,12 @@ set(ASIO_INC ${ThirdParty}/Include/asio)
 
 include_directories(
     ${CMAKE_SOURCE_DIR}
-#    ${V8_INC}
+    ${V8_INC}
     ${WEBSOCKET_INC}
     ${ASIO_INC}
     Inc
     ${CMAKE_SOURCE_DIR}/../../unreal/Puerts/Source/JsEnv/Private
-    ${CMAKE_SOURCE_DIR}/node
+    
 )
 
 set ( PUERTS_INC
@@ -118,7 +126,7 @@ if ( WIN32 AND NOT CYGWIN )
     target_compile_definitions (puerts PUBLIC BUILDING_V8_SHARED)
 endif ( )
 
-if ( JS_ENGINE STREQUAL "quickjs")
+if ( JS_ENGINE STREQUAL "quickjs" OR JS_ENGINE STREQUAL "node" )
     target_compile_definitions (puerts PRIVATE WITHOUT_INSPECTOR)
 endif ( )
 
@@ -196,15 +204,18 @@ elseif ( APPLE )
     if (IOS)
         target_compile_definitions (puerts PRIVATE PLATFORM_IOS)
     else ()
-        add_library(Node SHARED IMPORTED)
-        set_target_properties(Node PROPERTIES
-            IMPORTED_LOCATION /Users/yanghao/lib/libnode.83.dylib
-        )
-        target_link_libraries(puerts Node)
 
-        #target_link_libraries(puerts
-        #    ${V8_ENGINE}/Lib/macOS/${LIB_FILE_NAME}
-        #)
+        if ( JS_ENGINE STREQUAL "node")
+            add_library(Node SHARED IMPORTED)
+            set_target_properties(Node PROPERTIES
+                IMPORTED_LOCATION /Users/zombieyang/lib/libnode.83.dylib
+            )
+            target_link_libraries(puerts Node)
+        else ()
+            target_link_libraries(puerts
+                ${V8_ENGINE}/Lib/macOS/${LIB_FILE_NAME}
+            )
+        endif ()
         target_compile_definitions (puerts PRIVATE PLATFORM_MAC)
     endif ( )
 endif ( )
